@@ -25,6 +25,41 @@ CREATE TABLE IF NOT EXISTS leave_requests (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Function to automatically create user profile on user signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.user_profiles (id, first_name, last_name, email)
+    VALUES (
+        NEW.id, 
+        COALESCE(NEW.raw_user_meta_data->>'first_name', ''),
+        COALESCE(NEW.raw_user_meta_data->>'last_name', ''),
+        NEW.email
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to call the handle_new_user function
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Function to check if the current user is an admin
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+DECLARE 
+    current_user_role TEXT;
+BEGIN
+    -- Directly query the role without referencing the function to avoid recursion
+    SELECT role INTO current_user_role 
+    FROM public.user_profiles 
+    WHERE id = auth.uid();
+    
+    RETURN COALESCE(current_user_role = 'admin', false);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Triggers for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -32,7 +67,7 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
 CREATE TRIGGER update_user_profiles_updated_at
     BEFORE UPDATE ON user_profiles
@@ -48,7 +83,8 @@ CREATE TRIGGER update_leave_requests_updated_at
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
 
--- Policies for user_profiles
+-- User Profiles Policies
+-- Individual user can view/update their own profile
 CREATE POLICY "Users can view their own profile"
     ON user_profiles FOR SELECT
     USING (auth.uid() = id);
@@ -57,70 +93,48 @@ CREATE POLICY "Users can update their own profile"
     ON user_profiles FOR UPDATE
     USING (auth.uid() = id);
 
-CREATE POLICY "Admins can view all profiles"
+-- Admin policies for user profiles
+CREATE POLICY "Admins can view all user profiles"
     ON user_profiles FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    USING (public.is_admin());
 
-CREATE POLICY "Admins can update all profiles"
+CREATE POLICY "Admins can update any user profile"
     ON user_profiles FOR UPDATE
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    USING (public.is_admin());
 
--- Policies for leave_requests
-CREATE POLICY "Users can view their own requests"
+-- Leave Requests Policies
+-- Individual user policies
+CREATE POLICY "Users can view their own leave requests"
     ON leave_requests FOR SELECT
     USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can create their own requests"
+CREATE POLICY "Users can create their own leave requests"
     ON leave_requests FOR INSERT
     WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update their pending requests"
+CREATE POLICY "Users can update their pending leave requests"
     ON leave_requests FOR UPDATE
     USING (
         auth.uid() = user_id 
         AND status = 'pending'
     );
 
-CREATE POLICY "Users can delete their pending requests"
+CREATE POLICY "Users can delete their pending leave requests"
     ON leave_requests FOR DELETE
     USING (
         auth.uid() = user_id 
         AND status = 'pending'
     );
 
-CREATE POLICY "Admins can view all requests"
+-- Admin policies for leave requests
+CREATE POLICY "Admins can view all leave requests"
     ON leave_requests FOR SELECT
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    USING (public.is_admin());
 
-CREATE POLICY "Admins can update all requests"
+CREATE POLICY "Admins can update any leave request"
     ON leave_requests FOR UPDATE
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    USING (public.is_admin());
 
-CREATE POLICY "Admins can delete all requests"
+CREATE POLICY "Admins can delete any leave request"
     ON leave_requests FOR DELETE
-    USING (
-        EXISTS (
-            SELECT 1 FROM user_profiles
-            WHERE id = auth.uid() AND role = 'admin'
-        )
-    );
+    USING (public.is_admin());

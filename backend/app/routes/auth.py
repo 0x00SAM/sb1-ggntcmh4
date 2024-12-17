@@ -2,11 +2,14 @@
 Authentication routes module.
 Handles user authentication endpoints.
 """
-from flask import Blueprint, request, jsonify
-from app.utils.supabase_client import get_supabase_client
+from flask import Blueprint, request
+from app.utils.response import success_response, error_response
+from app.utils.db import get_supabase_client
 from app.services.user_service import UserService
+import logging
 
-auth_bp = Blueprint('auth', __name__)
+logger = logging.getLogger(__name__)
+auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 user_service = UserService()
 
 @auth_bp.route('/login', methods=['POST'])
@@ -14,60 +17,49 @@ def login():
     """Handle user login"""
     try:
         data = request.json
-        if not data or not data.get('email') or not data.get('password'):
-            return jsonify({'error': 'Email and password are required'}), 400
-            
         supabase = get_supabase_client()
-        response = supabase.auth.sign_in_with_password({
-            'email': data['email'],
-            'password': data['password']
+        
+        # Authenticate with Supabase
+        auth_response = supabase.auth.sign_in_with_password({
+            'email': data.get('email'),
+            'password': data.get('password')
         })
         
-        return jsonify({
-            'token': response.session.access_token,
-            'user': response.user
-        }), 200
+        # Get user profile
+        user = user_service.get_user(auth_response.user.id)
         
+        return success_response({
+            'token': auth_response.session.access_token,
+            'user': user.to_dict() if user else None
+        })
     except Exception as e:
-        return jsonify({'error': str(e)}), 401
+        logger.error(f"Login failed: {str(e)}")
+        return error_response("Invalid credentials", 401)
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
     """Handle user registration"""
     try:
         data = request.json
-        required_fields = ['email', 'password', 'firstName', 'lastName']
-        
-        if not data or not all(field in data for field in required_fields):
-            return jsonify({'error': 'All fields are required'}), 400
-            
         supabase = get_supabase_client()
+        
+        # Register with Supabase
         auth_response = supabase.auth.sign_up({
-            'email': data['email'],
-            'password': data['password'],
+            'email': data.get('email'),
+            'password': data.get('password'),
             'options': {
                 'data': {
-                    'first_name': data['firstName'],
-                    'last_name': data['lastName'],
+                    'first_name': data.get('firstName'),
+                    'last_name': data.get('lastName'),
                     'role': 'employee'  # Default role
                 }
             }
         })
         
-        # Create user profile
-        if auth_response.user:
-            profile_data = {
-                'first_name': data['firstName'],
-                'last_name': data['lastName'],
-                'email': data['email'],
-                'role': 'employee'
-            }
-            user_service.create_user_profile(auth_response.user.id, profile_data)
-        
-        return jsonify({
+        return success_response({
             'message': 'Registration successful',
             'user': auth_response.user
-        }), 201
-        
+        }, status_code=201)
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        logger.error(f"Registration failed: {str(e)}")
+        return error_response("Registration failed", 400)

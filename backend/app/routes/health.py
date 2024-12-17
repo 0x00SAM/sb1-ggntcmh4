@@ -1,5 +1,5 @@
 from flask import Blueprint, jsonify
-from app.utils.db import get_supabase_client
+from app.utils.db import test_db_connection
 
 health_bp = Blueprint('health', __name__, url_prefix='/api')
 
@@ -11,16 +11,15 @@ def health_check():
 @health_bp.route('/db-health')
 def db_health_check():
     """Database health check endpoint"""
-    try:
-        supabase = get_supabase_client()
-        # Simple query to test database connection
-        response = supabase.table('user_profiles').select('id').limit(1).execute()
+    success, message = test_db_connection()
+    
+    if success:
         return jsonify({
             'status': 'success',
-            'message': 'Database connection successful'
+            'message': message
         })
-    except Exception as e:
+    else:
         return jsonify({
             'status': 'error',
-            'message': str(e)
+            'message': message
         }), 500

@@ -12,7 +12,10 @@ def create_app(config_class=Config):
     """Create and configure the Flask application"""
     
     # Validate configuration
-    config_class.validate()
+    try:
+        config_class.validate()
+    except AttributeError as e:
+        raise RuntimeError("Config class does not have a validate method.") from e
     
     # Initialize Flask app
     app = Flask(__name__)

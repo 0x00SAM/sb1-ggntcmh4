@@ -5,6 +5,8 @@ Handles user-related endpoints.
 from flask import Blueprint, jsonify
 from app.utils.auth import token_required, admin_required
 from app.services.user_service import UserService
+from flask import Blueprint, jsonify, request
+
 
 users_bp = Blueprint('users', __name__)
 user_service = UserService()
